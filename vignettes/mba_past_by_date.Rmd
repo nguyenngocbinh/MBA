@@ -1,0 +1,215 @@
+---
+title: "mba_past_by_date"
+output: rmarkdown::html_vignette
+vignette: >
+  %\VignetteIndexEntry{mba_past_by_date}
+  %\VignetteEngine{knitr::rmarkdown}
+  %\VignetteEncoding{UTF-8}
+---
+
+```{r, include = FALSE}
+knitr::opts_chunk$set(
+  collapse = TRUE,
+  comment = "#>"
+)
+
+knitr::opts_chunk$set(echo = TRUE)
+library(rio)
+library(tidyverse)
+library(magrittr)
+library(lubridate)
+library(hrbrthemes)
+library(extrafont)
+
+  # using for Roboto font
+  loadfonts("pdf", quiet = TRUE)
+  loadfonts("postscript", quiet = TRUE)
+  if (.Platform$OS.type == "windows") {
+    loadfonts("win", quiet = TRUE)
+  }
+
+  update_geom_font_defaults(family=font_rc_light)
+
+```
+
+
+```{r prepare data}
+mba_past <- import("D:/Seabank/market.basket.analysis/inst/extdata/b_mba_past_by_date.csv")
+mba_past %<>% rename_all(tolower)
+
+# mba_past %>% names() %>% as.data.frame() %>% export("x.xlsx")
+
+ph <- c(
+  #'loan_khac',
+  'kd_ngan_han',
+  'kd_trung_dai_han',
+  #'sea_land',
+  'sea_home',
+  'sea_car',
+  'thau_chi',
+  'the_chap_khac',
+  'tin_chap_mon',
+  'sea_value',
+  'internet_banking',
+  'sms',
+  'tktt',
+  'tiet_kiem_ckh_online',
+  'tiet_kiem_ckh_quay',
+  #'deposit_khac',
+  'tiet_kiem_kkh',
+  'credit_card',
+  'debit_card',
+  'defer_card',
+  'baohiem_aia',
+  'seapay'
+)
+
+mba_past %<>% mutate_at(ph, mdy)
+
+mba_pivot <- mba_past %>%
+  select(customer_id, ph) %>%
+  gather(key = "ph", value = "mth", -customer_id) %>%
+  drop_na()
+
+rank_mth <- mba_pivot %>%
+  select(customer_id, mth) %>%
+  distinct() %>%
+  arrange(customer_id, mth) %>%
+  # Note: Nếu đk 2 sp cùng ngày thì tính rn bằng nhau
+  group_by(customer_id) %>%
+  mutate(rn = row_number())
+
+mba_pivot_rk <- mba_pivot %>% left_join(rank_mth, by = c("customer_id", "mth"))
+
+# Hàm chuyển dữ liệu sang dạng from - to
+f_from_to <- function(i){
+  df1 <- mba_pivot_rk %>% filter(rn == i)
+  df2 <- mba_pivot_rk %>% filter(rn == i+1)
+  df <- df1 %>% inner_join(df2, by = "customer_id")
+}
+
+# Dữ liệu khách hàng chuyển đổi sản phẩm theo thời gian
+mba_from_to <- mba_pivot_rk %>%
+  pull(rn) %>%
+  max() %>%
+  seq_len() %>%
+  map_dfr(f_from_to) %>%
+  arrange(customer_id, mth.x) %>%
+  # Khoảng cách giữa ngày sử dụng sản phẩm x và sản phẩm y
+  mutate(date_between = interval(mth.x, mth.y) %>%
+           int_length() %>%
+           # đơn vị ngày
+           divide_by(3600 * 24))
+```
+
+
+```{r function}
+# Hàm thống kê theo từng sản phẩm
+tbl_ph <- function(ph_from){
+  tbl_ph <- mba_from_to %>%
+    filter(ph.x == ph_from) %>%
+    group_by(ph.y) %>%
+    summarise(cnt = n(),
+              min_date = min(date_between),
+              max_date = max(date_between),
+              avg_date = mean(date_between)) %>%
+    arrange(-cnt) %>%
+    mutate(percent = round(cnt/sum(cnt), 3)*100) %>%
+    select(ph.y, cnt, percent, avg_date, min_date, max_date)
+  return(tbl_ph)
+}
+
+# Sau khi thống kê các sản phẩm, sử dụng hàm này để xem tỷ lệ chuyển sang sản phẩm nào tiếp theo
+track_ph <- function(ph_from, ph_remove){
+  tbl_ph(ph_from) %>%
+    filter(!(ph.y %in% ph_remove))
+}
+
+# Thay vì nhìn bằng bảng biểu sẽ sử dụng đồ thị để xem tỷ lệ chuyển sang sản phẩm tiếp theo
+plot_ph <- function(ph_from, ph_remove) {
+  df <- tbl_ph(ph_from)
+  p <- df %>%
+    ggplot()+
+    geom_col(aes(x=reorder(ph.y, -percent), y=percent), fill = "#208B88")+
+    geom_col(aes(x=ph.y, y=percent), fill = "grey", data = df[df$ph.y %in% ph_remove,])+
+    #scale_x_reverse(breaks = seq(max_len, 2, by = -1))+
+    #scale_x_continuous(breaks = seq(max_len, 2, by = -1))+
+    #scale_y_comma()+
+    #geom_label(aes(label= Freq))+
+    labs(title = paste("Product will used after", toupper(ph_from)),
+         subtitle = "(Grey: Products were used,\nGreen: Product will used next)",
+         x = NULL,
+         y = "Percent(%)")+
+    theme_ipsum_rc(grid="Y")+
+    theme(axis.text.x = element_text(angle = 90))
+
+  p
+
+}
+
+# Khoảng thời gian giữa các lần sử dụng sản phẩm
+
+plot_time_next <- function(ph_from) {
+  df <- tbl_ph(ph_from)
+  p <- df %>%
+    ggplot()+
+    geom_col(aes(x=reorder(ph.y, avg_date), y=avg_date), fill = "#EF5927")+
+    labs(title = paste("(Interval between time using", toupper(ph_from), "to another)"),
+         subtitle = "Average days using next product",
+         x = NULL,
+         y = "No of days")+
+    theme_ipsum_rc(grid="Y")+
+    theme(axis.text.x = element_text(angle = 90))
+
+  p
+
+}
+```
+
+# Sau khi sử dụng sản phẩm X, khách hàng sử dụng sản phẩm nào nhiều nhất (%)?
+
+Phần này sẽ lần lượt tìm đường đi của sản phẩm. Do KHCN đang quan tâm nhiều đến đường đi của sản phẩm sau khi khách hàng sử dụng sản phẩm SEAPAY. Nên phần dưới sẽ chọn SEAPAY làm gốc để đi tìm các sản phẩm tiếp theo
+
+
+```{r}
+plot_ph('seapay', c('internet_banking', 'debit_card', 'sms', 'tktt'))
+```
+
+-> Đồ thị cho thấy các sản phẩm khách hàng sẽ sử dụng nhiều nhất sau SEAPAY là CARD_DEBIT, SMS, INTERNET_BANKING. Do SEAPAY thường được bán combo cùng với 3 sản phẩm này
+
+Các sản phẩm tiếp theo khách hàng sẽ sử dụng là CREDIT CARD, tiết kiệm có kỳ hạn cả online và tại quầy
+
+```{r}
+plot_ph('credit_card', c('seapay', 'debit_card', 'sms', 'internet_banking', 'tktt'))
+
+```
+
+Sau khi sử dụng sản phẩm CREDIT CARD khách hàng có xu hướng sử dụng thêm sản phẩm bảo hiểm AIA, tiết kiệm có kỳ hạn cả online và tại quầy
+
+```{r}
+plot_ph('tiet_kiem_ckh_online', c('seapay', 'debit_card', 'sms', 'internet_banking', 'tktt'))
+
+```
+
+Sau khi sử dụng sản phẩm tiết kiệm có kỳ hạn online khách hàng có xu hướng sử dụng bảo hiểm AIA và CREDIT CARD
+
+```{r}
+plot_ph('tiet_kiem_ckh_quay', c('seapay', 'debit_card', 'sms', 'internet_banking', 'tktt'))
+```
+
+Sau khi sử dụng sản phẩm tiết kiệm có kỳ hạn tại quầy khách hàng có xu hướng sử dụng SEA_VALUE, tiết kiệm không kỳ hạn
+
+# Sau bao lâu khách hàng sử dụng sản phẩm X sẽ tiếp tục sử dụng sản phẩm khác Y ?
+
+(Trung bình bao nhiêu ngày sau khi sử dụng sản phẩm X thì khách hàng sử dụng tiếp sản phẩm Y)
+
+Xem xét lần lượt đối với sản phẩm SEAPAY, CARD_DEBIT, SMS, INTERNET_BANKING, CARD_CREDIT
+
+```{r}
+plot_time_next("seapay")
+plot_time_next("debit_card")
+plot_time_next("tktt")
+plot_time_next("sms")
+plot_time_next("internet_banking")
+plot_time_next("credit_card")
+```
