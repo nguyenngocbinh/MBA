@@ -1,0 +1,392 @@
+---
+title: "Market basket analysis - having products"
+output: rmarkdown::html_vignette
+vignette: >
+  %\VignetteIndexEntry{mba_current}
+  %\VignetteEngine{knitr::rmarkdown}
+  %\VignetteEncoding{UTF-8}
+---
+
+```{r, include = FALSE}
+knitr::opts_chunk$set(
+  collapse = TRUE,
+  comment = "#>"
+)
+```
+
+```{r setup, include=FALSE}
+library(market.basket.analysis)
+library(arules)
+library(arulesViz)
+library(DataExplorer)
+library(ggplot2)
+library(dplyr)
+library(magrittr)
+
+theme_nnb <- theme_minimal() +
+  theme(axis.line = element_line(colour = "black"),
+          panel.grid.major = element_blank(),
+          panel.grid.minor = element_blank(),
+          panel.border = element_blank(),
+          panel.background = element_blank()) 
+
+theme_set(theme_nnb)
+```
+
+> **Thông tin trong báo cáo này là tài sản của SeAbank và được bảo mật theo quy định của SeABank. Người nhận phải có trách nhiệm bảo mật thông tin, không phổ biến, sao chép, tiết lộ hay phát tán nếu chưa được sự đồng ý của người có thầm quyền tại SeABank**
+
+# Giới thiệu
+
+Basket analysis là kĩ thuật phân tích hành vi khách hàng dựa trên lịch sử giao dịch của họ, từ đó giúp cho bộ phận kinh doanh nắm được thị hiếu, thói quen tiêu dùng của khách hàng để có những chiến dịch Marketing một cách hợp lý
+
+# Ví dụ
+
+  - Một khách hàng, khi đi siêu thị, họ thường có xu hướng mua một vài sản phẩm cùng lúc. Ví dụ: Giỏ hàng của 1 khách hàng A bao gồm (Sữa, bánh mỳ, bia, thuốc lá), giỏ hàng của khách hàng B gồm (Sữa, bánh mỳ, bàn chải đánh răng, kem đánh răng) ... 
+
+  - Câu hỏi đặt ra là khách hàng thường mua những sản phẩm gì, sau khi mua sản phẩm X thì khách hàng sẽ mua sản phẩm Y nào, sản phẩm Z nào? 
+
+\(\Rightarrow \) **Việc phân tích giỏ hàng sẽ trả lời những câu hỏi trên**
+
+# Khái niệm cơ bản
+
+Đối với phân tích giỏ hàng, có một số khái niệm cơ bản là Association rules, Support, Confidence, Lift, Conviction
+
+## Association rules
+
+Associate rule định nghĩa như sau:
+
+$$X \Rightarrow Y \ where \ X \subset I, \ Y \subset I \ and \ X \cap Y = 0 $$
+\(\Rightarrow\) **Hay hiểu đơn giản khi khách hàng mua sắm nhóm sản phẩm X thì sẽ có khả năng dùng sản phẩm Y với 1 xác suất nào đấy**
+
+  - Ví dụ: Có 7 giao dịch của 1 cửa hàng quần áo như bảng sau:
+
+<center>
+
+| Transaction   | Items                                       | 
+|:--------------|:--------------------------------------------|
+| t1            | {T-shirt, Trousers, Belt}                   | 
+| t2            | {T-shirt, Jacket}                           |   
+| t3            | {Jacket, Gloves}                            |  
+| t4            | {T-shirt, Trousers, Jacket}                 | 
+| t5            | {T-shirt, Trousers, Sneakers, Jacket, Belt} |   
+| t6            | {Trousers, Sneakers, Belt}                  |
+| t7            | {Trousers, Belt, Sneakers}                  | 
+
+</center> 
+
+* Đặt các sản phẩm (item) như sau: \(I=\{i_1, i_2,..., i_k\}\). Tương ứng: \(I = \{T\text-shirt,Trousers,Belt,Jacket,Gloves,Sneakers\}\)
+
+
+* Giao dịch (transaction): \(T = \{t_1, t_2, ..., t_n \}\). Ví dụ: \(t_1=\{T\text-shirt, Trousers, Belt\} \)
+
+
+\(\Rightarrow\) Associate rule: \(\{T\text- shirt, Trousers\} \Rightarrow \{Belt\} \)
+
+
+### Support
+
+Support của 1 rule: Tần suất xuất hiện của cặp sản phẩm (X,Y) trong tổng số các giỏ hàng. Hay số lần cặp (X,Y) xuất hiện trong cùng 1 giỏ hàng chia tổng số giỏ hàng.
+
+Ví dụ: Trong số 100 khách hàng có 10 khách hàng đồng thời có sản phẩm (X, Y) => supp = 0.1
+
+Công thức tính:
+
+$$ supp(X \Rightarrow Y)=\dfrac{supp(X \cup Y)}{n} = \frac{P(X \cap Y)}{n} $$
+
+
+Ví dụ cách tính:
+
+* \(supp(T\text- shirt \Rightarrow Trousers)=\dfrac{3}{7}=43 \%\)
+
+* \(supp(Trousers \Rightarrow Belt)=\dfrac{4}{7}= 57 \%\)
+
+* \(supp(\{T\text- shirt, Trousers\} \Rightarrow \{Belt\})=\dfrac{2}{7}=28 \%\)
+
+
+### Confidence
+
+Confidence của 1 rule: là tỷ lệ % số lần xuất hiện Y trong những giỏ hàng có nhóm sản phẩm X. 
+
+Ví dụ: confidence = 50% nghĩa là: cứ 100 khách hàng mua nhóm sản phẩm X thì có 50 khách hàng sẽ mua sản phẩm Y
+
+$$ conf(X \Rightarrow Y)=\dfrac{supp(X \cup Y)}{supp(X)} = \frac{P(X\cap Y)}{P(X)} $$
+
+- Ví dụ: Trousers xuất hiện 5/ 7 giỏ hàng, Trousers và Belt đồng thời xuất hiện 4/7 giỏ hàng. Khi đó
+
+$$ conf(Trousers \Rightarrow Belt)=\dfrac{4/7}{5/7}= 80 \% $$
+
+- Tương tự với nhóm khác: 
+
+  * \(conf(T\text- shirt \Rightarrow Belt)=\dfrac{2/7}{4/7}=50 \%\)
+
+  * \(conf(\{T\text- shirt, Trousers\} \Rightarrow \{Belt\})=\dfrac{2/7}{3/7}=66 \%\)
+
+### Lift
+
+Khi khách hàng đã có sản phẩm X, cơ hội mua sản phẩm Y tăng lên bao nhiêu %
+
+\(\Rightarrow \) **Giá trị của Lift càng lớn thì sự kết hợp giữa X và Y càng chặt**. 
+
+- Lift > 1: Sự xuất hiện của sản phẩm X làm **tăng** khả năng mua sản phẩm Y
+- Lift < 1: Sự xuất hiện của sản phẩm X làm **giảm** khả năng mua sản phẩm Y
+- Lift = 1: Sự xuất hiện của sản phẩm X **không ảnh hưởng** đến khả năng mua sản phẩm Y
+
+Ví dụ: lift = 1.25 có nghĩa là: *Khi đã có sản phẩm X, khả năng khách hàng mua sản phẩm Y cao hơn (1.25 - 1)x100= 25%* 
+
+$$ lift(X \Rightarrow Y)= \frac{conf(X \Rightarrow Y)}{supp(Y)}=\frac{supp(X \cup Y)}{supp(X)supp(Y)} = \frac{P(X\cap Y)}{P(X)P(Y)}$$
+
+  - Ví dụ: 
+
+    * \(lift(T\text- shirt \Rightarrow Trousers)=\dfrac{3/7}{(4/7)(5/7)}= 1.05\)
+
+    * \(lift(Trousers \Rightarrow Belt)=\dfrac{4/7}{(5/7)(4/7)}= 1.4\) 
+
+    * \(lift(\{T\text- shirt, Trousers\} \Rightarrow \{Belt\})=\dfrac{2/7}{(3/7)(4/7)}=1.17 \) 
+
+### Conviction
+
+Conviction của 1 rule được định nghĩa như sau:
+
+$$ conv(X \Rightarrow Y)=\dfrac{1-supp(Y)}{1-conf(X \Rightarrow Y) } $$
+
+\(\Rightarrow\) Chỉ số này được hiểu là khả năng X xảy ra mà không có Y
+
+
+Tóm lại:
+
+  - Support dùng để đánh giá số lần xuất hiện của rule \(X \Rightarrow Y\) trong tổng số các giỏ hàng
+  - Confidence dùng để đánh giá khả năng xuất hiện Y trong những giỏ hàng có nhóm sản phẩm X 
+  - Lift đo lường mức độ chặt chẽ trong sự kết hợp của rule \(X \Rightarrow Y\) (càng lớn càng chặt)
+  - Conviction đo lường khả năng xảy ra X mà không có Y (càng nhỏ càng tốt)
+
+# Phân tích khả năng bán chéo sản phẩm
+
+Dữ liệu đầu vào là product holding của các khách hàng (chỉ xét khách hàng có contact_date từ sau 1/1/2017, và những sản phẩm khách hàng hiện tại đang có)
+
+
+```{r import data}
+load("product_current.RData")
+```
+
+
+## Khám phá dữ liệu
+
+- Đặc điểm dữ liệu
+```{r data understanding}
+DataExplorer::introduce(product) %>% t()
+```
+
+- Tỷ lệ missing
+
+```{r data understanding2, fig.width=7, fig.height=4.5}
+plot_missing(product)
+```
+
+Loại những trường hợp tuổi và giới tính bằng missing
+
+- Số lượng sản phẩm: `r length(ph)`
+
+```{r}
+product %>% mutate(x = rowSums(select(product, ph), na.rm = TRUE)) -> x
+khong_sp <- ifelse(x$x == 0, 0, 1) %>% table() 
+prop_khong_sp <- khong_sp %>% prop.table()
+
+```
+
+- Số lượng khách hàng không có sản phẩm: `r khong_sp[1] ` khách hàng (`r round(prop_khong_sp[1] *100,2)`%)
+- Số lượng khách hàng có từ 1 sản phẩm: `r khong_sp[2] ` khách hàng (`r round(prop_khong_sp[2] *100,2)`%)
+
+## Xem tỷ lệ, số lượng sản phẩm khách hàng sở hữu
+
+### Với tất cả khách hàng
+```{r, fig.width=7, fig.height=4.5, fig.align='center'}
+plot_customer_frequency(trans_all)
+```
+
+```{r, fig.width=7, fig.height=4.5, fig.align='center'}
+plot_item_frequency(trans_all)
+```
+
+### Với cán bộ nhân viên SeAbank
+```{r, fig.width=7, fig.height=4.5, fig.align='center'}
+plot_customer_frequency(trans_in1)
+```
+
+```{r, fig.width=7, fig.height=4.5, fig.align='center'}
+plot_item_frequency(trans_in1)
+```
+
+### Với khách hàng không phải cán bộ nhân viên
+```{r, fig.width=7, fig.height=4.5, fig.align='center'}
+plot_customer_frequency(trans_out1)
+```
+
+```{r, fig.width=7, fig.height=4.5, fig.align='center'}
+plot_item_frequency(trans_out1)
+```
+
+Từ đồ thị có thể thấy tỷ lệ khách hàng sở hữu sản phẩm sms, card_credit, deposit_ac, internet_banking là rất cao. Nếu sử dụng nguyên dữ liệu này thì khó mà có thể phát hiện ra **rules** với mức support vào confidence cao. Vì vậy, ta có thể thực hiện theo các cách sau: 
+
+- Một là nhóm các sản phẩm có frequency thấp vào để tạo thành 1 sản phẩm chung sao cho có tỷ lệ khách hàng đáng kể. 
+
+- Hai là, loại các sản phẩm mà hầu hết các khách hàng đều có ra khỏi mẫu.
+
+- Ba là, hạ thấp tỷ lệ support và confidence
+
+\(\Rightarrow\) Sản phẩm **sms** hầu hết khách hàng nào cũng có, vì vậy, sản phẩm này sẽ bị loại ra khỏi mẫu
+
+## Tìm tham số phù hợp (support và confidence)
+
+### Cách lựa chọn tham số
+
+Số lượng rules có được phụ thuộc vào sự đánh đổi giữa ngưỡng suppport và confidence. Nếu chúng ta chọn ngưỡng support và confidence càng cao thì số lượng rules càng thấp. Ngưỡng tối ưu phụ thuộc vào mục đích của người phân tích. Nếu nhiều rules quá sẽ gây nhiễu đối với người phân tích. Nhưng nếu muốn tìm được rules của những sản phẩm có freq thấp thì bắt buộc phải chọn ngưỡng support và confidence thấp để có nhiều rules hơn. 
+
+### Ví dụ lựa chọn tham số
+
+```{r, include=FALSE}
+# Chạy grid theo 2 tham số support và confidence để tìm số lượng rules
+df_parameter_grid <- grid_search_sup_conf(trans_all)
+```
+
+- Biểu đồ số lượng rules theo confidences và supports
+
+```{r, fig.width=5.5, fig.height=5.5, fig.align='center'}
+# Vẽ các đồ thị số lượng rules theo confidences và supports
+plot_grid_sup_conf(df_parameter_grid)
+```
+
+### Phân tích kết quả
+
+  - Với support = 10% và support = 5%: nếu để đạt được độ tin cậy cao thì số lượng rules không nhiều. Vì vậy, những sản phẩm với freq thấp thì không thể xuất hiện được trong những rules này. Vì, với support quá cao thì sẽ chỉ tìm được rules với những sản phẩm có freq cao. 
+
+# Lựa chọn rules
+
+Liên quan đến L.H.S (left hand side items), và R.H.S (right hand side items)
+
+- Trường hợp 1 (L.H.S)
+
+Cán bộ sale muốn biết: Sau khi mua sản phẩm x, khách hàng thường mua sản phẩm gì
+
+- Trường hợp 2 (R.H.S): 
+
+Cán bộ sale muốn biết: KH thường sử dụng sản phẩm gì trước khi sử dụng sản phẩm x
+
+- Do đặc điểm của 2 tập khách hàng ngoài và cán bộ nhân viên là khác nhau, nên ta sẽ tách riêng 2 tập khách hàng này để phân tích và lựa chọn rules
+
+## Đối với khách hàng không phải cán bộ nhân viên
+
+- Hầu hết khách hàng có 2 sản phẩm, nên trong phần này ta sẽ tập trung vào những khách hàng đang có 2 sản phẩm và xem sản phẩm tiếp theo mà họ sẽ sử dụng là gì
+
+```{r, include=FALSE}
+rules_len <- search_rules(trans_out, min_len = 3, max_len = 3)
+```
+  
+  - Lấy 1 rules có lift lớn nhất theo mỗi nhóm sản phẩm L.H.S
+  
+```{r}
+rules_len %>% 
+  DATAFRAME() %>% 
+  group_by(LHS) %>% 
+  slice(which.max(lift)) %>% 
+  knitr::kable()
+```
+
+
+  - Lấy 1 rules có lift lớn nhất theo sản phẩm R.H.S
+
+```{r}
+rules_len %>% 
+  DATAFRAME() %>% 
+  group_by(RHS) %>% 
+  slice(which.max(lift)) %>% 
+  knitr::kable()
+```
+
+
+  - Lấy 2 rules có lift lớn nhất theo 1 sản phẩm L.H.S
+```{r, include=FALSE}
+rules_len <- search_rules(trans_out, min_len = 2, max_len = 2)
+```
+
+```{r}
+rules_len %>% 
+  DATAFRAME() %>% 
+  group_by(LHS) %>% 
+  slice(which.max(lift)) %>% 
+  knitr::kable()
+```
+
+  
+### Lựa chọn rules cho sản phẩm credit card
+
+```{r, fig.width=5, fig.height=5, fig.align='center'}
+rules_len %>% 
+  subset(rhs %in% "credit_card") %T>%
+  plot(method = "graph") %>% 
+  DATAFRAME() %>% 
+  knitr::kable()
+```
+
+
+Đọc kết quả: rule {baohiem_aia}	=>	{card_credit}
+
+- Có 5499 (count = 5499) trường hợp khách hàng đã sử dụng **sản phẩm bảo hiểm AIA** sẽ sử dụng thêm **sản phẩm card_credit**, chiếm 3.6% (support = 0.036), với độ tin cậy 66% (confidence = 0.66). Nghĩa là 100 khách hàng mua sản phẩm AIA thì sẽ có 66 khách hàng sử dụng thêm sản phẩm credit card. 
+
+- Hiện tại, tỷ lệ khách hàng đã sử dụng sản phẩm AIA và sản phẩm card_credit là 3.6% (support = 0.036) như vậy vẫn còn tiềm năng lớn để khai thác rule như thế này
+
+- Mặt khác, khả năng khách hàng đã sử dụng sản phẩm bảo hiểm AIA sẽ sử dụng thêm sản phẩm card_credit cao hơn (3.7 - 1) lần so với bình thường. Tức là khả năng bán thành công sản phẩm card credit cho khách hàng đã sử dụng sản phẩm bảo hiểm AIA cao hơn 2.7 lần so với khi khách hàng chưa sử dụng sản phẩm nào
+
+### Lựa chọn rules cho sản phẩm bảo hiểm aia
+
+```{r, fig.width=5, fig.height=5, fig.align='center'}
+rules_len %>% 
+  subset(rhs %in% "baohiem_aia") %T>%
+  plot(method = "graph") %>%   
+  DATAFRAME() %>% 
+  knitr::kable()
+```
+
+### Lựa chọn rules cho sản phẩm tín chấp món
+
+```{r, fig.width=5, fig.height=5, fig.align='center'}
+rules_len %>% 
+  subset(rhs %in% "tin_chap_mon") %T>%
+  plot(method = "graph") %>% 
+  DATAFRAME() %>% 
+  knitr::kable() 
+```
+
+
+### Lựa chọn rules cho sản phẩm tiền gửi tiết kiệm tại quầy
+
+```{r, fig.width=5, fig.height=5, fig.align='center'}
+rules_len %>% 
+  subset(rhs %in% "tiet_kiem_ckh_quay") %T>%
+  plot(method = "graph") %>% 
+  DATAFRAME() %>% 
+  knitr::kable()
+```
+
+
+### Lựa chọn rules cho sản phẩm tiền gửi tiết kiệm online
+
+```{r, warning=FALSE, include=FALSE, eval=FALSE}
+rules_len %>% 
+  subset(rhs %in% "tiet_kiem_ckh_online") %T>%
+  plot(method = "graph") %>% 
+  DATAFRAME() %>% 
+  knitr::kable()
+```
+
+
+- Không tìm thấy rules thỏa mãn
+
+References
+
+- https://www.kaggle.com/xvivancos/market-basket-analysis
+
+- https://www.listendata.com/2015/12/market-basket-analysis-with-r.html
+
+- https://michael.hahsler.net/research/association_rules/measures.html
+
+- https://medium.com/machine-learning-researcher/association-rule-apriori-and-eclat-algorithm-4e963fa972a4
